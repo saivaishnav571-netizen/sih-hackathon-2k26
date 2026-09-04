@@ -1,7 +1,9 @@
 import React, { useEffect, useRef, useState, useMemo } from 'react';
-import * as maplibregl from 'maplibre-gl';
-import 'maplibre-gl/dist/maplibre-gl.css';
+import type * as maplibreType from 'maplibre-gl';
 import './LogisticsMapNavigation.css';
+
+// Use MapLibre from CDN (window object) to completely bypass Vite worker bundling issues in production.
+const maplibregl = (window as any).maplibregl as typeof maplibreType;
 import {
   CornerUpRight,
   CornerUpLeft,

@@ -20,9 +20,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/")
-def root():
-    return {"status": "ok", "message": "Smart Logistics API is running"}
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+
+# Setup paths for the compiled frontend
+dist_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+
+# Mount assets folder for faster static serving
+if os.path.exists(os.path.join(dist_dir, "assets")):
+    app.mount("/assets", StaticFiles(directory=os.path.join(dist_dir, "assets")), name="assets")
 
 from api.weather import get_weather
 from api.warehouses import get_nearby_warehouses
@@ -56,3 +62,15 @@ def analyze_route(req: RouteRequest):
         raise HTTPException(status_code=404, detail=str(err))
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
+
+@app.get("/{full_path:path}")
+def serve_frontend(full_path: str):
+    if not os.path.exists(dist_dir):
+        return {"status": "ok", "message": "API running. Frontend not built."}
+    
+    file_path = os.path.join(dist_dir, full_path)
+    if os.path.isfile(file_path):
+        return FileResponse(file_path)
+    
+    return FileResponse(os.path.join(dist_dir, "index.html"))
+

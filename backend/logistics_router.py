@@ -23,12 +23,27 @@ _GEOCODE_CACHE: dict = {}
 
 def geocode(place: str) -> tuple[float, float]:
     """
-    Resolve a city/place name to (longitude, latitude) using Nominatim.
-    Caches results to avoid hitting Nominatim rate limit (1 req/sec).
+    Resolve a city/place name to (longitude, latitude).
+    Uses Google Maps Geocoding API if key is present, otherwise falls back to Nominatim.
     """
     key = place.strip().lower()
     if key in _GEOCODE_CACHE:
         return _GEOCODE_CACHE[key]
+        
+    gmap_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if gmap_key:
+        try:
+            gmap_url = "https://maps.googleapis.com/maps/api/geocode/json"
+            resp = requests.get(gmap_url, params={"address": place, "key": gmap_key}, timeout=10)
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("results"):
+                    loc = data["results"][0]["geometry"]["location"]
+                    result = (float(loc["lng"]), float(loc["lat"]))
+                    _GEOCODE_CACHE[key] = result
+                    return result
+        except Exception as e:
+            print("Google Maps Geocoding failed:", e)
 
     url = "https://nominatim.openstreetmap.org/search"
     q = place if "india" in place.lower() else f"{place}, India"

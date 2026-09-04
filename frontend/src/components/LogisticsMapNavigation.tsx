@@ -177,6 +177,8 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
   const featuresRef = useRef<RouteFeature[]>([]);
   const selectedRouteIdRef = useRef<string>(selectedRouteId);
   const markersRef = useRef<maplibregl.Marker[]>([]);
+  const addedLayersRef = useRef<Set<string>>(new Set());
+  const addedSourcesRef = useRef<Set<string>>(new Set());
 
   const vehicleMarkerRef = useRef<maplibregl.Marker | null>(null);
   const animIntervalRef = useRef<number | null>(null);
@@ -346,22 +348,44 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     markersRef.current.forEach(mk => mk.remove());
     markersRef.current = [];
 
-    // Clean up existing route layers/sources dynamically
-    const style = m.getStyle();
-    if (style && style.layers) {
-      style.layers.forEach(layer => {
-        if (layer.id.startsWith('route_') || layer.id.includes('_seg_')) {
-          try { m.removeLayer(layer.id); } catch (e) {}
-        }
-      });
-    }
-    if (style && style.sources) {
-      Object.keys(style.sources).forEach(sourceId => {
-        if (sourceId.startsWith('route_') || sourceId.includes('_seg_')) {
-          try { m.removeSource(sourceId); } catch (e) {}
-        }
-      });
-    }
+    // Safely remove any previously added layers first
+    addedLayersRef.current.forEach(layerId => {
+      try {
+        if (m.getLayer(layerId)) m.removeLayer(layerId);
+      } catch (e) {}
+    });
+    addedLayersRef.current.clear();
+
+    // Safely remove any previously added sources
+    addedSourcesRef.current.forEach(sourceId => {
+      try {
+        if (m.getSource(sourceId)) m.removeSource(sourceId);
+      } catch (e) {}
+    });
+    addedSourcesRef.current.clear();
+
+    // Sweep any stale style layers or sources
+    try {
+      const style = m.getStyle();
+      if (style && style.layers) {
+        style.layers.forEach(layer => {
+          if (layer.id.startsWith('route_') || layer.id.includes('_seg_') || layer.id.includes('-glow') || layer.id.includes('-line')) {
+            try {
+              if (m.getLayer(layer.id)) m.removeLayer(layer.id);
+            } catch (e) {}
+          }
+        });
+      }
+      if (style && style.sources) {
+        Object.keys(style.sources).forEach(sourceId => {
+          if (sourceId.startsWith('route_') || sourceId.includes('_seg_')) {
+            try {
+              if (m.getSource(sourceId)) m.removeSource(sourceId);
+            } catch (e) {}
+          }
+        });
+      }
+    } catch (e) {}
 
     // Draw each route
     routeFeatures.forEach(feature => {
@@ -381,42 +405,63 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
           const mainColor = seg.color || (isHighRisk ? '#ef4444' : isModRisk ? '#f59e0b' : '#10b981');
           const glowColor = isHighRisk ? '#f87171' : isModRisk ? '#fbbf24' : '#34d399';
 
+          const geoData = {
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: seg.coordinates },
+            properties: { route_id: id, label: seg.label || '', risk_level: seg.risk_level || '' },
+          };
+
           try {
-            m.addSource(segSourceId, {
-              type: 'geojson',
-              data: {
-                type: 'Feature',
-                geometry: { type: 'LineString', coordinates: seg.coordinates },
-                properties: { ...feature.properties, label: seg.label, risk_level: seg.risk_level },
-              } as any,
-            });
+            if (m.getSource(segSourceId)) {
+              (m.getSource(segSourceId) as maplibregl.GeoJSONSource).setData(geoData as any);
+            } else {
+              m.addSource(segSourceId, {
+                type: 'geojson',
+                data: geoData as any,
+              });
+            }
+            addedSourcesRef.current.add(segSourceId);
 
             // Outer glow
-            m.addLayer({
-              id: segGlowId,
-              type: 'line',
-              source: segSourceId,
-              layout: { 'line-join': 'round', 'line-cap': 'round' },
-              paint: {
-                'line-color': glowColor,
-                'line-width': isActive ? (isHighRisk ? 22 : 16) : 8,
-                'line-opacity': isActive ? (isHighRisk ? 0.65 : 0.35) : 0.15,
-                'line-blur': 6,
-              },
-            });
+            if (!m.getLayer(segGlowId)) {
+              m.addLayer({
+                id: segGlowId,
+                type: 'line',
+                source: segSourceId,
+                layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: {
+                  'line-color': glowColor,
+                  'line-width': isActive ? (isHighRisk ? 22 : 16) : 8,
+                  'line-opacity': isActive ? (isHighRisk ? 0.65 : 0.35) : 0.15,
+                  'line-blur': 6,
+                },
+              });
+            } else {
+              m.setPaintProperty(segGlowId, 'line-color', glowColor);
+              m.setPaintProperty(segGlowId, 'line-width', isActive ? (isHighRisk ? 22 : 16) : 8);
+              m.setPaintProperty(segGlowId, 'line-opacity', isActive ? (isHighRisk ? 0.65 : 0.35) : 0.15);
+            }
+            addedLayersRef.current.add(segGlowId);
 
             // Main segment line
-            m.addLayer({
-              id: segLineId,
-              type: 'line',
-              source: segSourceId,
-              layout: { 'line-join': 'round', 'line-cap': 'round' },
-              paint: {
-                'line-color': mainColor,
-                'line-width': isActive ? (isHighRisk ? 8 : 6) : 3,
-                'line-opacity': isActive ? 1 : 0.5,
-              },
-            });
+            if (!m.getLayer(segLineId)) {
+              m.addLayer({
+                id: segLineId,
+                type: 'line',
+                source: segSourceId,
+                layout: { 'line-join': 'round', 'line-cap': 'round' },
+                paint: {
+                  'line-color': mainColor,
+                  'line-width': isActive ? (isHighRisk ? 8 : 6) : 4,
+                  'line-opacity': isActive ? 1 : 0.6,
+                },
+              });
+            } else {
+              m.setPaintProperty(segLineId, 'line-color', mainColor);
+              m.setPaintProperty(segLineId, 'line-width', isActive ? (isHighRisk ? 8 : 6) : 4);
+              m.setPaintProperty(segLineId, 'line-opacity', isActive ? 1 : 0.6);
+            }
+            addedLayersRef.current.add(segLineId);
           } catch (err) {
             console.error('Failed to add segment layer:', segSourceId, err);
           }
@@ -424,45 +469,72 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
       } else {
         // Fallback single line
         const colors = getRiskLineColor(feature.properties.risk_level);
+        const glowId = `${id}-glow`;
+        const lineId = `${id}-line`;
+        const geoData = {
+          type: 'Feature',
+          geometry: feature.geometry,
+          properties: { route_id: id, risk_level: feature.properties.risk_level || '' },
+        };
+
         try {
-          m.addSource(id, {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              geometry: feature.geometry,
-              properties: feature.properties,
-            } as any,
-          });
+          if (m.getSource(id)) {
+            (m.getSource(id) as maplibregl.GeoJSONSource).setData(geoData as any);
+          } else {
+            m.addSource(id, {
+              type: 'geojson',
+              data: geoData as any,
+            });
+          }
+          addedSourcesRef.current.add(id);
 
-          m.addLayer({
-            id: `${id}-glow`,
-            type: 'line',
-            source: id,
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: {
-              'line-color': colors.glow,
-              'line-width': isActive ? 20 : 8,
-              'line-opacity': isActive ? 0.5 : 0.15,
-              'line-blur': 8,
-            },
-          });
+          if (!m.getLayer(glowId)) {
+            m.addLayer({
+              id: glowId,
+              type: 'line',
+              source: id,
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: {
+                'line-color': colors.glow,
+                'line-width': isActive ? 20 : 8,
+                'line-opacity': isActive ? 0.5 : 0.15,
+                'line-blur': 8,
+              },
+            });
+          } else {
+            m.setPaintProperty(glowId, 'line-color', colors.glow);
+            m.setPaintProperty(glowId, 'line-width', isActive ? 20 : 8);
+            m.setPaintProperty(glowId, 'line-opacity', isActive ? 0.5 : 0.15);
+          }
+          addedLayersRef.current.add(glowId);
 
-          m.addLayer({
-            id: `${id}-line`,
-            type: 'line',
-            source: id,
-            layout: { 'line-join': 'round', 'line-cap': 'round' },
-            paint: {
-              'line-color': colors.main,
-              'line-width': isActive ? 7 : 3,
-              'line-opacity': isActive ? 1 : 0.5,
-            },
-          });
+          if (!m.getLayer(lineId)) {
+            m.addLayer({
+              id: lineId,
+              type: 'line',
+              source: id,
+              layout: { 'line-join': 'round', 'line-cap': 'round' },
+              paint: {
+                'line-color': colors.main,
+                'line-width': isActive ? 7 : 3,
+                'line-opacity': isActive ? 1 : 0.5,
+              },
+            });
+          } else {
+            m.setPaintProperty(lineId, 'line-color', colors.main);
+            m.setPaintProperty(lineId, 'line-width', isActive ? 7 : 3);
+            m.setPaintProperty(lineId, 'line-opacity', isActive ? 1 : 0.5);
+          }
+          addedLayersRef.current.add(lineId);
         } catch (err) {
           console.error('Failed to add route layer:', id, err);
         }
       }
     });
+
+    try {
+      m.triggerRepaint();
+    } catch (e) {}
 
     // Add Start/End markers for active route
     const activeFeat = routeFeatures.find(f => f.properties.route_id === activeId) || routeFeatures[0];

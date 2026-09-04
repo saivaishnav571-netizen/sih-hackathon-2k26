@@ -5,7 +5,7 @@ import LogisticsMapNavigation from '../components/LogisticsMapNavigation';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useLocation } from 'react-router-dom';
 
-const API = 'http://localhost:8000';
+const API = '';
 
 export default function RoutePlanner() {
   const location = useLocation();

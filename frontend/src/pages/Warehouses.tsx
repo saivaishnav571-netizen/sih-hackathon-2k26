@@ -14,7 +14,7 @@ export default function Warehouses() {
   useEffect(() => {
     const fetchWarehouses = async () => {
       try {
-        const res = await axios.get('http://localhost:8000/api/warehouses?lat=26.1158&lon=91.7086');
+        const res = await axios.get('/api/warehouses?lat=26.1158&lon=91.7086');
         if (res.data.status === 'success') {
           setWarehouses(res.data.data);
         }

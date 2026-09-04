@@ -27,7 +27,7 @@ export default function Weather() {
           }
         }
 
-        const res = await axios.get(`http://localhost:8000/api/weather?lat=${lat}&lon=${lon}`);
+        const res = await axios.get(`/api/weather?lat=${lat}&lon=${lon}`);
         if (res.data.status === 'success') {
           setWeather(res.data.data);
         }

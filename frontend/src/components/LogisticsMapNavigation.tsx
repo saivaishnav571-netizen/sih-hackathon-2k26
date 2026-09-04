@@ -348,44 +348,9 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
     markersRef.current.forEach(mk => mk.remove());
     markersRef.current = [];
 
-    // Safely remove any previously added layers first
-    addedLayersRef.current.forEach(layerId => {
-      try {
-        if (m.getLayer(layerId)) m.removeLayer(layerId);
-      } catch (e) {}
-    });
-    addedLayersRef.current.clear();
-
-    // Safely remove any previously added sources
-    addedSourcesRef.current.forEach(sourceId => {
-      try {
-        if (m.getSource(sourceId)) m.removeSource(sourceId);
-      } catch (e) {}
-    });
-    addedSourcesRef.current.clear();
-
-    // Sweep any stale style layers or sources
-    try {
-      const style = m.getStyle();
-      if (style && style.layers) {
-        style.layers.forEach(layer => {
-          if (layer.id.startsWith('route_') || layer.id.includes('_seg_') || layer.id.includes('-glow') || layer.id.includes('-line')) {
-            try {
-              if (m.getLayer(layer.id)) m.removeLayer(layer.id);
-            } catch (e) {}
-          }
-        });
-      }
-      if (style && style.sources) {
-        Object.keys(style.sources).forEach(sourceId => {
-          if (sourceId.startsWith('route_') || sourceId.includes('_seg_')) {
-            try {
-              if (m.getSource(sourceId)) m.removeSource(sourceId);
-            } catch (e) {}
-          }
-        });
-      }
-    } catch (e) {}
+    // Keep track of layers/sources we touch during this render
+    const touchedLayers = new Set<string>();
+    const touchedSources = new Set<string>();
 
     // Draw each route
     routeFeatures.forEach(feature => {
@@ -420,7 +385,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
                 data: geoData as any,
               });
             }
-            addedSourcesRef.current.add(segSourceId);
+            touchedSources.add(segSourceId);
 
             // Outer glow
             if (!m.getLayer(segGlowId)) {
@@ -441,7 +406,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
               m.setPaintProperty(segGlowId, 'line-width', isActive ? (isHighRisk ? 22 : 16) : 8);
               m.setPaintProperty(segGlowId, 'line-opacity', isActive ? (isHighRisk ? 0.65 : 0.35) : 0.15);
             }
-            addedLayersRef.current.add(segGlowId);
+            touchedLayers.add(segGlowId);
 
             // Main segment line
             if (!m.getLayer(segLineId)) {
@@ -461,7 +426,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
               m.setPaintProperty(segLineId, 'line-width', isActive ? (isHighRisk ? 8 : 6) : 4);
               m.setPaintProperty(segLineId, 'line-opacity', isActive ? 1 : 0.6);
             }
-            addedLayersRef.current.add(segLineId);
+            touchedLayers.add(segLineId);
           } catch (err) {
             console.error('Failed to add segment layer:', segSourceId, err);
           }
@@ -486,7 +451,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
               data: geoData as any,
             });
           }
-          addedSourcesRef.current.add(id);
+          touchedSources.add(id);
 
           if (!m.getLayer(glowId)) {
             m.addLayer({
@@ -506,7 +471,7 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
             m.setPaintProperty(glowId, 'line-width', isActive ? 20 : 8);
             m.setPaintProperty(glowId, 'line-opacity', isActive ? 0.5 : 0.15);
           }
-          addedLayersRef.current.add(glowId);
+          touchedLayers.add(glowId);
 
           if (!m.getLayer(lineId)) {
             m.addLayer({
@@ -525,12 +490,28 @@ export const LogisticsMapNavigation: React.FC<LogisticsMapProps> = ({
             m.setPaintProperty(lineId, 'line-width', isActive ? 7 : 3);
             m.setPaintProperty(lineId, 'line-opacity', isActive ? 1 : 0.5);
           }
-          addedLayersRef.current.add(lineId);
+          touchedLayers.add(lineId);
         } catch (err) {
           console.error('Failed to add route layer:', id, err);
         }
       }
     });
+
+    // Cleanup stale layers
+    addedLayersRef.current.forEach(layerId => {
+      if (!touchedLayers.has(layerId)) {
+        try { if (m.getLayer(layerId)) m.removeLayer(layerId); } catch (e) {}
+      }
+    });
+    addedLayersRef.current = touchedLayers;
+
+    // Cleanup stale sources
+    addedSourcesRef.current.forEach(sourceId => {
+      if (!touchedSources.has(sourceId)) {
+        try { if (m.getSource(sourceId)) m.removeSource(sourceId); } catch (e) {}
+      }
+    });
+    addedSourcesRef.current = touchedSources;
 
     try {
       m.triggerRepaint();
